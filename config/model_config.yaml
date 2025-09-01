@@ -1,0 +1,12 @@
+# model_config.yaml：模型和数据处理的配置
+voice_synthesis:
+  data_prep:  # 音频预处理配置
+    sample_rate: 16000  # 音频采样率（VITS模型要求16000Hz）
+    audio_format: wav   # 预处理后音频格式
+    noise_reduce: True  # 是否去噪音（开启）
+  model:  # 后续训练用的模型配置（先写上，后面用）
+    type: VITS  # 模型类型（VITS声线合成）
+    pretrained_model_path: "core/voice_synthesis/models/vits_pretrained.pth"  # 预训练模型路径
+    train_epochs: 50  # 训练次数（零基础用50次，足够生成声线）
+    batch_size: 4     # 每次训练用的样本数（CPU用2，GPU用4）
+    device: "cpu"     # 训练设备（cpu或cuda，零基础先用cpu，慢但稳定）
