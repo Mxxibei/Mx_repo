@@ -97,57 +97,76 @@ def remove_noise(wav_path, output_path):
 
 # 主函数：整合所有步骤
 def main():
-    # 加载配置
     config = load_config()
-    # 1. 定义各种路径（不用改，配置文件里会设）
     project_root = get_project_root()
-    input_audio_dir = os.path.join(project_root, "data", "input", "audio")  # 原始音频文件夹
-    segment_file = os.path.join(input_audio_dir, "valid_segment01.txt")  # 有效段标注文件
-    # 输出路径：预处理后的音频放在data/output/audio/processed/
+    input_audio_dir = os.path.join(project_root, "data", "input", "audio")
+    # ---------------------- 修改：标注文件用新的multi版本 ----------------------
+    segment_file = os.path.join(input_audio_dir, "valid_segment_multi.txt")
+    # ---------------------- 修改：预处理后的音频路径（和原始音频同名，加_clean） ----------------------
     output_dir = os.path.join(project_root, "data", "output", "audio", "processed")
-    os.makedirs(output_dir, exist_ok=True)  # 自动创建文件夹（如果没有）
+    os.makedirs(output_dir, exist_ok=True)
 
-    # 2. 解析有效段
-    print("开始解析有效段标注文件...")
-    segments_dict = parse_valid_segments(segment_file)
-    print(f"解析完成，共找到{len(segments_dict)}个音频的有效段")
+    # 解析有效段（修改解析逻辑，支持audio 01_jp格式）
+    print("开始解析多声线有效段标注文件...")
+    segments_dict = parse_valid_segments(segment_file)  # 原parse函数不用改，会自动识别“01_jp”作为key
+    print(f"解析完成，共找到{len(segments_dict)}个声线-语言组合的有效段")
 
-    # 3. 处理每个mp3音频
-    # 遍历input_audio_dir里的所有mp3文件
+    # 处理每个mp3音频
     for mp3_file in os.listdir(input_audio_dir):
         if not mp3_file.endswith(".mp3"):
-            continue  # 只处理mp3文件
-        # 解析mp3文件名：如character01_01.mp3→声线编号01，样本序号01
-        mp3_name = mp3_file.replace(".mp3", "")  # character01_01
-        audio_num = mp3_name.split("_")[1]  # 取“01”“02”（对应audio 01、audio 02）
-
-        # 检查该音频是否有有效段标注
-        if audio_num not in segments_dict:
-            print(f"警告：{mp3_file}没有对应的有效段标注，跳过处理")
+            continue
+        # 解析文件名：character01_jp_01.mp3 → 声线-语言组合（01_jp）
+        mp3_name = mp3_file.replace(".mp3", "")  # character01_jp_01
+        speaker_lang = "_".join(mp3_name.split("_")[1:3])  # 取“01_jp”（从第2个_到第3个_）
+        # 检查该声线-语言组合是否有有效段
+        if speaker_lang not in segments_dict:
+            print(f"警告：{mp3_file}对应的{speaker_lang}没有有效段标注，跳过")
             continue
 
-        # 4. 步骤1：mp3转wav
+        # 后续步骤（mp3转wav、剪切、去噪）不变，但保存路径改到output_dir，文件名加_clean
         mp3_path = os.path.join(input_audio_dir, mp3_file)
+        # 预处理后的wav文件名：character01_jp_01_clean.wav
+        clean_wav_name = f"{mp3_name}_clean.wav"
+        clean_wav_path = os.path.join(output_dir, clean_wav_name)
+
+        # 步骤1：mp3转wav（临时文件）
         temp_wav_path = os.path.join(output_dir, f"{mp3_name}_temp.wav")
         mp3_to_wav(mp3_path, temp_wav_path)
 
-        # 5. 步骤2：按有效段剪切
-        valid_segments = segments_dict[audio_num]
-        cut_wav_paths = cut_audio_by_segments(temp_wav_path, valid_segments, output_dir)
+        # 步骤2：按有效段剪切（取第一个有效段即可，或循环剪切所有段）
+        valid_segments = segments_dict[speaker_lang]
+        # 简化：取第一个有效段（如果要多段，可循环处理）
+        first_segment = valid_segments[0]
+        start_str, end_str = first_segment.split("-")
+        start_str = start_str.replace("：", ":")
+        end_str = end_str.replace("：", ":")
+        start_min, start_sec = map(int, start_str.split(":"))
+        end_min, end_sec = map(int, end_str.split(":"))
+        start_ms = (start_min * 60 + start_sec) * 1000
+        end_ms = (end_min * 60 + end_sec) * 1000
+        audio = AudioSegment.from_wav(temp_wav_path)
+        cut_audio = audio[start_ms:end_ms]
 
-        # 6. 步骤3：对每个剪切片段去噪
-        for cut_wav_path in cut_wav_paths:
-            # 去噪后的文件名：如character01_01_cut_1_clean.wav
-            clean_wav_name = os.path.basename(cut_wav_path).replace(".wav", "_clean.wav")
-            clean_wav_path = os.path.join(output_dir, clean_wav_name)
-            remove_noise(cut_wav_path, clean_wav_path)
+        # 步骤3：去噪并保存
+        remove_noise(cut_audio.export(temp_wav_path, format="wav"), clean_wav_path)
 
-        # 删除临时wav文件（转格式用的，没用了）
+        # 更新metadata中的音频路径（关键！把原始路径改成预处理后的路径）
+        metadata_path = os.path.join(input_audio_dir, "metadata.csv")
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            for line in lines:
+                if mp3_path in line:
+                    # 替换原始路径为预处理后的路径
+                    new_line = line.replace(mp3_path, clean_wav_path)
+                    f.write(new_line)
+                else:
+                    f.write(line)
+
         os.remove(temp_wav_path)
-        print(f"===== {mp3_file} 预处理完成 =====\n")
+        print(f"===== {mp3_file} 预处理完成，干净音频：{clean_wav_path} =====")
 
-    print("所有音频预处理完成！干净的有效音频在：", output_dir)
-
+    print("所有多声线音频预处理完成！")
 
 # 运行脚本（只有当直接运行这个文件时才执行main函数）
 if __name__ == "__main__":

@@ -9,4 +9,4 @@ voice_synthesis:
     pretrained_model_path: "core/voice_synthesis/models/vits_pretrained.pth"  # 预训练模型路径
     train_epochs: 50  # 训练次数（零基础用50次，足够生成声线）
     batch_size: 4     # 每次训练用的样本数（CPU用2，GPU用4）
-    device: "cpu"     # 训练设备（cpu或cuda，零基础先用cpu，慢但稳定）
+    device: "cuda"     # 训练设备（cpu或cuda，零基础先用cpu，慢但稳定）
